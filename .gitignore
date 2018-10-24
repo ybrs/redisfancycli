@@ -1,0 +1,8 @@
+env/
+env3/
+__pycache__
+_redisclipy.py
+*.log
+tmp/
+.idea/
+.redisclihist
