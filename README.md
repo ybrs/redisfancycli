@@ -1,4 +1,10 @@
 A fancier redis client
 =======================
 
-.. image :: https://github.com/ybrs/fancyrediscli/raw/master/rdscliscreenshot.png
+![GitHub Logo](rdscliscreenshot.png)
+
+
+Note
+=======================
+
+This is currently in progress. So it will be changed a lot.
