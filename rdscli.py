@@ -237,7 +237,7 @@ class Client(object):
 
     def send_command(self, raw):
         cmd = self.process_command(raw)
-        self.rds.send_command(cmd)
+        self.rds.send_packed_command(['{}\r\n'.format(cmd).encode('utf-8')])
 
     def read_response(self):
         resp = self.rds.read_response()
