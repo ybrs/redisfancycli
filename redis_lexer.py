@@ -70,12 +70,76 @@ class RedisLexer(RegexLexer):
         ]
     }
 
+
+def tokenize_redis_command(s):
+    args = []
+    buf = []
+    l = len(s)
+    cnt = 0
+
+    def buffer_until(remainder, char):
+        buf = []
+        c = 0
+        while c < len(remainder):
+            k = remainder[c]
+            if k == char:
+                if remainder[c-1] != '\\':
+                    return (''.join(buf), c+2)
+            buf.append(k)
+            c += 1
+        return (''.join(buf), c+2)
+
+    while cnt < l:
+        k = s[cnt]
+        if k == '"' or k == "'":
+            b, c = buffer_until(s[cnt+1:], k)
+            cnt = cnt + c
+            args.append(b)
+        elif k == ' ':
+            args.append(''.join(buf))
+            buf = []
+        else:
+            buf.append(k)
+
+        cnt += 1
+    if buf:
+        args.append(''.join(buf))
+
+    print("----> args -->", args)
+    return args
+
 if __name__ == '__main__':
     from pygments import highlight
     import re
     code = '''eval 'return redis.call("get","foo")' 0 '''
-    print(highlight(code, RedisLexer(), Terminal256Formatter()))
 
-    code = '''eval "return redis.call(\"get\") return x" 0 ZSCORE'''
-    print(re.match(r'(.+)((?<!\\)\")', code).groups())
-    print(highlight(code, RedisLexer(), Terminal256Formatter()))
+    test_cases = [
+        # ('''set foo bar''', ['set', 'foo', 'bar']),
+        # ('''set foo bar baz!''', ['set', 'foo', 'bar', 'baz!']),
+        # ('''set "foo x" bar''', ['set', 'foo x', 'bar']),
+        # ('''set "foo x" "bar"''', ['set', 'foo x', 'bar']),
+        # ('''set "foo x " "bar''', ['set', 'foo x ', 'bar']),
+        # (r'set "foo \"xyz\" " "bar', ['set', 'foo \\"xyz\\" ', 'bar']),
+        # (r"set 'foo \'xyz\' ' 'bar'", ['set', "foo \\'xyz\\' ", 'bar']),
+
+        # test multiline
+        ("""set foo xyz '{
+            "hello": "bar"
+        }' """, ['set', "foo", "xyz",
+                               r'''{
+            "hello": "bar"
+        }''']),
+
+    ]
+
+    for k, v in test_cases:
+        assert tokenize_redis_command(k) == v
+
+
+
+
+    # print(highlight(code, RedisLexer(), Terminal256Formatter()))
+    #
+    # code = '''eval "return redis.call(\"get\") return x" 0 ZSCORE'''
+    # print(re.match(r'(.+)((?<!\\)\")', code).groups())
+    # print(highlight(code, RedisLexer(), Terminal256Formatter()))
