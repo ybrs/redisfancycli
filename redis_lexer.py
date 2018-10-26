@@ -1,7 +1,10 @@
 import re
 
+from pygments.formatters.terminal256 import Terminal256Formatter
 from pygments.lexer import RegexLexer, words
 from pygments.token import Text, Keyword, Name, String, Number
+from pygments.lexers.scripting import LuaLexer
+from pygments.lexer import RegexLexer, bygroups, using
 
 
 class RedisLexer(RegexLexer):
@@ -26,7 +29,7 @@ class RedisLexer(RegexLexer):
         'CLUSTER SETSLOT', 'CLUSTER SLAVES', 'CLUSTER SLOTS', 'COMMAND', 
         'COMMAND COUNT', 'COMMAND GETKEYS', 'COMMAND INFO', 'CONFIG GET',
         'CONFIG REWRITE', 'CONFIG SET', 'CONFIG RESETSTAT', 'DBSIZE', 'DEBUG OBJECT', 'DEBUG SEGFAULT', 'DECR', 'DECRBY',
-        'DEL', 'DISCARD', 'DUMP', 'ECHO', 'EVAL', 'EVALSHA', 'EXEC', 'EXISTS',
+        'DEL', 'DISCARD', 'DUMP', 'ECHO', 'EVALSHA', 'EXEC', 'EXISTS',
         'EXPIRE', 'EXPIREAT', 'FLUSHALL', 'FLUSHDB', 'GEOADD', 'GEOHASH', 'GEOPOS', 'GEODIST',
         'GEORADIUS', 'GEORADIUSBYMEMBER', 'GET', 'GETBIT', 'GETRANGE', 'GETSET', 'HDEL', 'HEXISTS',
         'HGET', 'HGETALL', 'HINCRBY', 'HINCRBYFLOAT', 'HKEYS', 'HLEN', 'HMGET', 'HMSET',
@@ -46,9 +49,33 @@ class RedisLexer(RegexLexer):
         'ZREVRANGEBYLEX', 'ZRANGEBYSCORE', 'ZRANK', 'ZREM', 'ZREMRANGEBYLEX', 'ZREMRANGEBYRANK', 'ZREMRANGEBYSCORE', 'ZREVRANGE',
         'ZREVRANGEBYSCORE', 'ZREVRANK', 'ZSCORE', 'ZUNIONSTORE', 'SCAN', 'SSCAN', 'HSCAN', 'ZSCAN' ), suffix=r'\b'),
              Keyword),
+
+            (r'EVAL \"', String.Single, ('string-lua', )),
+            (r'EVAL \'', String.Single, ('string-lua2',)),
+
             (r'[0-9]+', Number.Integer),
             (r"'(''|[^'])*'", String.Single),
-            (r'"(""|[^"])*"', String.Symbol), 
-            (r'[a-z_][\w$]*', Name)  
+            (r'"(""|[^"])*"', String.Double),
+            (r'[a-z_][\w$]*', Name)
+        ],
+        'string-lua2': [
+            (r'(.+)((?<!\\)\')',
+             bygroups(using(LuaLexer), String.Single),
+            )
+        ],
+        'string-lua': [
+            (r'(.+)((?<!\\)\")',
+             bygroups(using(LuaLexer), String.Single),
+            )
         ]
     }
+
+if __name__ == '__main__':
+    from pygments import highlight
+    import re
+    code = '''eval 'return redis.call("get","foo")' 0 '''
+    print(highlight(code, RedisLexer(), Terminal256Formatter()))
+
+    code = '''eval "return redis.call(\"get\") return x" 0 ZSCORE'''
+    print(re.match(r'(.+)((?<!\\)\")', code).groups())
+    print(highlight(code, RedisLexer(), Terminal256Formatter()))
