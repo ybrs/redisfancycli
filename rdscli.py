@@ -121,7 +121,7 @@ class DefaultState(State):
 
 class MonitorState(State):
     def when(self, cmd, current_state):
-        if cmd.lower().startswith('monitor'):
+        if cmd and cmd[0].lower().startswith('monitor'):
             return self
         return current_state
 
@@ -138,7 +138,8 @@ class MonitorState(State):
 
 class SelectState(State):
     def when(self, cmd, current_state):
-        if cmd.lower().startswith('select '):
+        logger.debug("cmd: %s", cmd)
+        if cmd and cmd[0].lower().startswith('select '):
             return self
         return current_state
 
@@ -155,7 +156,7 @@ class SelectState(State):
 
 class InfoState(State):
     def when(self, cmd, current_state):
-        if cmd.lower().startswith('info'):
+        if cmd and cmd[0].lower().startswith('info'):
             return self
         return current_state
 
@@ -236,8 +237,8 @@ class Client(object):
         return self.state.process_reply(reply)
 
     def send_command(self, raw):
-        cmd = self.process_command(raw)
-        args = tokenize_redis_command(raw)
+        cmd = tokenize_redis_command(raw)
+        args = self.process_command(cmd)
         logger.debug(args)
         self.rds.send_command(*args)
         # self.rds.send_packed_command(['{}\r\n'.format(cmd).encode('utf-8')])
