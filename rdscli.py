@@ -22,6 +22,9 @@ from cli_helpers.tabular_output import TabularOutputFormatter
 logging.basicConfig(filename='cli.log', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+def debug(s, *args):
+    logger.debug(s + '%s ' * len(args), *args)
+
 
 REDIS_COMMANDS = [ 
         'APPEND', 'AUTH', 'BGREWRITEAOF', 'BGSAVE', 'BITCOUNT', 'BITFIELD', 'BITOP', 'BITPOS',
@@ -121,7 +124,7 @@ class DefaultState(State):
 
 class MonitorState(State):
     def when(self, cmd, current_state):
-        if cmd and cmd[0].lower().startswith('monitor'):
+        if cmd and cmd[0].upper().startswith('MONITOR'):
             return self
         return current_state
 
@@ -136,10 +139,10 @@ class MonitorState(State):
                 print_formatted_text(HTML(force_unicode(resp)))
         return resp
 
+
 class SelectState(State):
     def when(self, cmd, current_state):
-        logger.debug("cmd: %s", cmd)
-        if cmd and cmd[0].lower().startswith('select '):
+        if cmd and cmd[0].upper().startswith('SELECT '):
             return self
         return current_state
 
@@ -156,7 +159,7 @@ class SelectState(State):
 
 class InfoState(State):
     def when(self, cmd, current_state):
-        if cmd and cmd[0].lower().startswith('info'):
+        if cmd and cmd[0].upper().startswith('INFO'):
             return self
         return current_state
 
@@ -223,7 +226,7 @@ class Client(object):
     def find_next_state(self, cmd):
         next_state = self.state
         for st in self.avail_states:
-            next_state = st.when(cmd, self.state)
+            next_state = st.when(cmd, next_state)
         self.set_state(next_state)
 
     def set_state(self, state):
