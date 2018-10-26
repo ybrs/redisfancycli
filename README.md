@@ -1,7 +1,29 @@
 A fancier redis client
 =======================
 
-![GitHub Logo](rdscliscreenshot.png)
+![Screenshot](images/rdscliscreenshot.png)
+
+
+Some Features
+=======================
+
+Multiline Paste
+----------------
+You can paste some long string as you'd like, useful for pasting data from your editor.
+
+![Screenshot](images/multiline-paste.png)
+
+Multiline Edit
+----------------
+Edit long data in place
+
+![Screenshot](images/multilinemode.png)
+
+Inline lua script highlight
+---------------------------
+
+![Screenshot](images/inline-lua-highlight.png)
+
 
 
 Note

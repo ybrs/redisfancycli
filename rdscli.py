@@ -1,6 +1,6 @@
 from __future__ import unicode_literals
 from prompt_toolkit import prompt, ANSI
-from redis_lexer import RedisLexer
+from redis_lexer import RedisLexer, tokenize_redis_command
 from prompt_toolkit.lexers import PygmentsLexer
 from pygments.styles import get_style_by_name
 from prompt_toolkit.styles.pygments import style_from_pygments_cls
@@ -237,7 +237,10 @@ class Client(object):
 
     def send_command(self, raw):
         cmd = self.process_command(raw)
-        self.rds.send_packed_command(['{}\r\n'.format(cmd).encode('utf-8')])
+        args = tokenize_redis_command(raw)
+        logger.debug(args)
+        self.rds.send_command(*args)
+        # self.rds.send_packed_command(['{}\r\n'.format(cmd).encode('utf-8')])
 
     def read_response(self):
         resp = self.rds.read_response()
@@ -365,13 +368,24 @@ def main(host, port, database):
     rds_completer.set_client(client)
     completer = merge_completers([rds_completer])
 
+    multiline = False
+
     while True:
         try:
             text = session.prompt('> ',
                     lexer=PygmentsLexer(RedisLexer),
                     completer=completer,
                     bottom_toolbar=bottom_toolbar,
+                    multiline=multiline,
                     auto_suggest=AutoSuggestFromHistory())
+
+            if text.lower() == '.multiline':
+                multiline = not multiline
+                print_formatted_text("multiline mode [{}]".format(multiline))
+                if multiline:
+                    print_formatted_text('press Escape and then ENTER to send command')
+                continue
+
             if text.upper() == 'QUIT':
                 return
 
@@ -388,12 +402,6 @@ def main(host, port, database):
 if __name__ == '__main__':
     """
     TODO: 
-        - eval doesn't work
-            properly we need to send this>
-                1540393114.258185 [0 127.0.0.1:58438] "eval" "return redis.call('set','foo','bar')" "0"
-            but we are sending this>
-                1540393094.146694 [0 127.0.0.1:58434] "eval" "\"return" "redis.call('set','foo','bar')\"" "0"
-
         - client in receive mode !
             - multi
             - watch

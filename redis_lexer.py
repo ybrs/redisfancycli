@@ -6,6 +6,12 @@ from pygments.token import Text, Keyword, Name, String, Number
 from pygments.lexers.scripting import LuaLexer
 from pygments.lexer import RegexLexer, bygroups, using
 
+"""
+set somejson '{
+    "echo": "bar"
+}'
+
+"""
 
 class RedisLexer(RegexLexer):
     """
@@ -105,7 +111,6 @@ def tokenize_redis_command(s):
     if buf:
         args.append(''.join(buf))
 
-    print("----> args -->", args)
     return args
 
 if __name__ == '__main__':
