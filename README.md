@@ -19,6 +19,13 @@ Edit long data in place
 
 ![Screenshot](images/multilinemode.png)
 
+Printing tables
+------------------
+Some commands prints tables
+
+![Screenshot](images/hash_tables.png)
+
+
 Inline lua script highlight
 ---------------------------
 

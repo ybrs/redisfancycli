@@ -435,6 +435,7 @@ if __name__ == '__main__':
     TODO: 
         - package
         - brew package
+        - print tables for ZRANGE
         - .raw mode
         - ssh tunnel
         - client in receive mode !
