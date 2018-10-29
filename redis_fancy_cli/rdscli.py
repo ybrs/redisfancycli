@@ -1,6 +1,6 @@
 from __future__ import unicode_literals
 from prompt_toolkit import prompt, ANSI
-from redis_lexer import RedisLexer, tokenize_redis_command
+from .redis_lexer import RedisLexer, tokenize_redis_command
 from prompt_toolkit.lexers import PygmentsLexer
 from pygments.styles import get_style_by_name
 from prompt_toolkit.styles.pygments import style_from_pygments_cls
@@ -18,9 +18,9 @@ import time
 import click
 import logging
 from cli_helpers.tabular_output import TabularOutputFormatter
+from .config import get_config
+logger = None
 
-logging.basicConfig(filename='cli.log', level=logging.DEBUG)
-logger = logging.getLogger(__name__)
 
 def debug(s, *args):
     logger.debug(s + '%s ' * len(args), *args)
@@ -57,9 +57,6 @@ REDIS_COMMANDS = [
         'ZREVRANGEBYSCORE', 'ZREVRANK', 'ZSCORE', 'ZUNIONSTORE', 'SCAN', 'SSCAN', 'HSCAN', 'ZSCAN' 
     ]
 REDIS_COMMANDS.sort()
-
-style = style_from_pygments_cls(get_style_by_name('monokai'))
-session = PromptSession(history=FileHistory('.redisclihist'))
 
 def is_json(s):
     try:
@@ -153,7 +150,7 @@ class SelectState(State):
     def process_reply(self, resp):
         if resp == b'OK':
             self.client.selected_db = self.next_db
-            self.client.set_state(self.client.avail_states[0])
+        self.client.set_state(self.client.avail_states[0])
         return resp
 
 
@@ -207,6 +204,29 @@ class InfoState(State):
         return '\n'.join(ret)
 
 
+class HgetallState(State):
+    def when(self, cmd, current_state):
+        if cmd and cmd[0].upper().startswith('HGETALL'):
+            return self
+        return current_state
+
+    def process_command(self, cmd):
+        return cmd
+
+    def process_reply(self, resp):
+        data = force_unicode(resp)
+        debug('hgetall ', data)
+        values = []
+        headers = ['key', 'value']
+        i = iter(data)
+        for k, v in zip(i, i):
+            values.append([k, v])
+
+        formatter = TabularOutputFormatter()
+        self.client.set_state(self.client.avail_states[0])
+        return '\n'.join([ln for ln in formatter.format_output(values, headers, format_name='fancy_grid')])
+
+
 class Client(object):
     def __init__(self, rds):
         self.rds = rds
@@ -217,6 +237,7 @@ class Client(object):
             self.default_state,
             SelectState(self),
             InfoState(self),
+            HgetallState(self),
             MonitorState(self)
         ]
 
@@ -244,7 +265,6 @@ class Client(object):
         args = self.process_command(cmd)
         logger.debug(args)
         self.rds.send_command(*args)
-        # self.rds.send_packed_command(['{}\r\n'.format(cmd).encode('utf-8')])
 
     def read_response(self):
         resp = self.rds.read_response()
@@ -341,13 +361,20 @@ class RedisCompleter(Completer):
                 for k in resp:
                     yield Completion(force_unicode(k), start_position=-len(word_before_cursor))
 
-
-
 @click.command()
 @click.option("--host", '-h', default="127.0.0.1", help="Host")
 @click.option("--port", '-p', default=6379, help="Host")
 @click.option("--database", '-d', default=0, help="Database")
 def main(host, port, database):
+    global logger
+    config = get_config()
+
+    logging.basicConfig(filename=config['log_file'], level=logging.getLevelName(config['log_level']))
+    logger = logging.getLogger(__name__)
+
+    style = style_from_pygments_cls(get_style_by_name('monokai'))
+    session = PromptSession(history=FileHistory(config['history_file']))
+
     def bottom_toolbar():
         return HTML('127.0.0.1:6379 db:{} keys:{}'.format(client.selected_db, client.keycount()))
 
@@ -406,10 +433,15 @@ def main(host, port, database):
 if __name__ == '__main__':
     """
     TODO: 
+        - package
+        - brew package
+        - .raw mode
+        - ssh tunnel
         - client in receive mode !
             - multi
             - watch
             - subscribe to channels
             - pipe
+        - connections ?
     """
     main()
