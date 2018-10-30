@@ -1,5 +1,7 @@
 from __future__ import unicode_literals
 from prompt_toolkit import prompt, ANSI
+from prompt_toolkit.styles import Style, merge_styles
+
 from .redis_lexer import RedisLexer, tokenize_redis_command
 from prompt_toolkit.lexers import PygmentsLexer
 from pygments.styles import get_style_by_name
@@ -19,6 +21,7 @@ import click
 import logging
 from cli_helpers.tabular_output import TabularOutputFormatter
 from .config import get_config
+from .commands import commands
 logger = None
 
 
@@ -314,6 +317,12 @@ def print_response(resp):
         logger.exception('Exception in print_formatted_text')
 
 
+CLI_COMMANDS = {
+    '.multiline': 'enters/exits multiline mode',
+    '.help': 'get info about a command',
+    '.exit': 'exits'
+}
+
 class RedisCompleter(Completer):
 
     def set_client(self, client):
@@ -332,12 +341,16 @@ class RedisCompleter(Completer):
 
         if not document.text:
             for k in REDIS_COMMANDS:
-                yield Completion(k, start_position=-len(word_before_cursor))
+                yield Completion(k, display_meta='', start_position=-len(word_before_cursor))
+
+        elif document.text.startswith('.'):
+            for k, v in CLI_COMMANDS.items():
+                yield Completion(k, display_meta=v, start_position=-len(word_before_cursor))
 
         elif ' ' not in document.text:
-            for k in REDIS_COMMANDS:
+            for k, v in commands.items():
                 if k.lower().startswith(document.text.lower()):
-                    yield Completion(k, start_position=-len(word_before_cursor))
+                    yield Completion(k, display_meta=v['summary'], start_position=-len(word_before_cursor))
         else:
             if document.text.lower().strip() == 'select':
                 for k in range(16):
@@ -361,6 +374,24 @@ class RedisCompleter(Completer):
                 for k in resp:
                     yield Completion(force_unicode(k), start_position=-len(word_before_cursor))
 
+
+def run_help_command(*args):
+    for arg in args:
+        c = commands.get(arg.upper())
+        if not c:
+            print_formatted_text('Command does not exists')
+            return
+        print_formatted_text(c)
+
+cli_command_fns = {
+    '.help': run_help_command
+}
+
+
+def run_dot_command(command):
+    cmd = command.split(' ')
+    cli_command_fns[cmd[0]](*cmd[1:])
+
 @click.command()
 @click.option("--host", '-h', default="127.0.0.1", help="Host")
 @click.option("--port", '-p', default=6379, help="Host")
@@ -372,8 +403,18 @@ def main(host, port, database):
     logging.basicConfig(filename=config['log_file'], level=logging.getLevelName(config['log_level']))
     logger = logging.getLogger(__name__)
 
-    style = style_from_pygments_cls(get_style_by_name('monokai'))
-    session = PromptSession(history=FileHistory(config['history_file']))
+    style_base = style_from_pygments_cls(get_style_by_name('monokai'))
+
+    style_custom = Style.from_dict({
+        'completion-menu.completion': 'bg:#008888 #ffffff',
+        'completion-menu.completion.current': 'bg:#00aaaa #000000',
+        'scrollbar.background': 'bg:#88aaaa',
+        'scrollbar.button': 'bg:#222222',
+    })
+
+    style = merge_styles([style_base, style_custom])
+
+    session = PromptSession(history=FileHistory(config['history_file']), style=style)
 
     def bottom_toolbar():
         return HTML('127.0.0.1:6379 db:{} keys:{}'.format(client.selected_db, client.keycount()))
@@ -417,6 +458,13 @@ def main(host, port, database):
                     print_formatted_text('press Escape and then ENTER to send command')
                 continue
 
+            if ' ' in text:
+                c = text.split(' ')
+                if c[0].startswith('.'):
+                    # our dot commands
+                    run_dot_command(text)
+                    continue
+
             if text.upper() == 'QUIT':
                 return
 
@@ -433,6 +481,9 @@ def main(host, port, database):
 if __name__ == '__main__':
     """
     TODO: 
+        - wrap long lines in hgetall (and others) tables
+        - use https://raw.githubusercontent.com/antirez/redis-doc/master/commands.json to get commands
+        - use COMMAND to get command list to merge 
         - package
         - brew package
         - print tables for ZRANGE
