@@ -6,3 +6,4 @@ _redisclipy.py
 tmp/
 .idea/
 .redisclihist
+commands.json

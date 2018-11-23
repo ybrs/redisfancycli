@@ -207,23 +207,52 @@ class InfoState(State):
         return '\n'.join(ret)
 
 
-class HgetallState(State):
+def with_scores_headers(cmd):
+    debug("withscores >>>", cmd)
+    if cmd[-1].upper() == 'WITHSCORES':
+        return ('Key', 'Value')
+    return ('Value',)
+
+
+def table_headers(cmd):
+    return ('Key', 'Value')
+
+
+table_commands = {
+    'HGETALL': table_headers,
+    'ZRANGE':  with_scores_headers,
+    'ZREVRANGE': with_scores_headers,
+    'ZRANGEBYLEX': table_headers,
+    'ZRANGEBYSCORE': table_headers,
+    'ZREVRANGEBYLEX': table_headers,
+    'ZREVRANGEBYSCORE': table_headers,
+    'ZREVRANK': table_headers,
+}
+
+
+class TableOutputState(State):
     def when(self, cmd, current_state):
-        if cmd and cmd[0].upper().startswith('HGETALL'):
+        if cmd and cmd[0].upper() in table_commands:
             return self
         return current_state
 
     def process_command(self, cmd):
+        # we store a ref. for cmd, because if withscores etc. is there,
+        # then the data shape is different
+        self.cmd = cmd
         return cmd
 
     def process_reply(self, resp):
         data = force_unicode(resp)
-        debug('hgetall ', data)
+        if not self.client.table_mode:
+            return data
+
+        headers = table_commands[self.cmd[0].upper()](self.cmd)
+
         values = []
-        headers = ['key', 'value']
         i = iter(data)
-        for k, v in zip(i, i):
-            values.append([k, v])
+        for v in zip(*([i] * len(headers)) ):
+            values.append(v)
 
         formatter = TabularOutputFormatter()
         self.client.set_state(self.client.avail_states[0])
@@ -234,13 +263,14 @@ class Client(object):
     def __init__(self, rds):
         self.rds = rds
         self.selected_db = 0
+        self.table_mode = True
         self.default_state = DefaultState(self)
 
         self.avail_states = [
             self.default_state,
             SelectState(self),
             InfoState(self),
-            HgetallState(self),
+            TableOutputState(self),
             MonitorState(self)
         ]
 
@@ -319,6 +349,7 @@ def print_response(resp):
 
 CLI_COMMANDS = {
     '.multiline': 'enters/exits multiline mode',
+    '.tables': 'set tables on/off',
     '.help': 'get info about a command',
     '.exit': 'exits'
 }
@@ -375,7 +406,7 @@ class RedisCompleter(Completer):
                     yield Completion(force_unicode(k), start_position=-len(word_before_cursor))
 
 
-def run_help_command(*args):
+def run_help_command(*args, client=None):
     for arg in args:
         c = commands.get(arg.upper())
         if not c:
@@ -383,14 +414,23 @@ def run_help_command(*args):
             return
         print_formatted_text(c)
 
+
+def enable_disable_table_mode(*args, client=None):
+    client.table_mode = not client.table_mode
+    print_formatted_text("table output [{}]".format(client.table_mode))
+
+
 cli_command_fns = {
+    '.tables': enable_disable_table_mode,
     '.help': run_help_command
 }
 
 
-def run_dot_command(command):
+def run_dot_command(command, client=None):
     cmd = command.split(' ')
-    cli_command_fns[cmd[0]](*cmd[1:])
+    debug('cli command', command)
+    cli_command_fns[cmd[0]](*cmd[1:], client=client)
+
 
 @click.command()
 @click.option("--host", '-h', default="127.0.0.1", help="Host")
@@ -458,12 +498,14 @@ def main(host, port, database):
                     print_formatted_text('press Escape and then ENTER to send command')
                 continue
 
-            if ' ' in text:
-                c = text.split(' ')
-                if c[0].startswith('.'):
-                    # our dot commands
-                    run_dot_command(text)
-                    continue
+            c = text.split(' ')
+            if c[0].startswith('.'):
+                # our dot commands
+                try:
+                    run_dot_command(text, client=client)
+                except KeyError as e:
+                    print_formatted_text('Unknown .command [{}]'.format(text))
+                continue
 
             if text.upper() == 'QUIT':
                 return
