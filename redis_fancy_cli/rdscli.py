@@ -1,6 +1,7 @@
 from __future__ import unicode_literals
 from prompt_toolkit import prompt, ANSI
 from prompt_toolkit.styles import Style, merge_styles
+from redis.connection import SYM_EMPTY, SYM_STAR, SYM_CRLF, SYM_DOLLAR
 
 from .redis_lexer import RedisLexer, tokenize_redis_command
 from prompt_toolkit.lexers import PygmentsLexer
@@ -76,7 +77,7 @@ def colourful_json(o):
 
 def force_unicode(s):
     if isinstance(s, six.binary_type):
-        return s.decode('utf-8')
+        return s.decode('utf-8', 'backslashreplace')
     if isinstance(s, int):
         return str(s)
     return s
@@ -259,6 +260,11 @@ class TableOutputState(State):
         return '\n'.join([ln for ln in formatter.format_output(values, headers, format_name='fancy_grid')])
 
 
+
+def b(x):
+    return x.encode('latin-1') if not isinstance(x, bytes) else x
+
+
 class Client(object):
     def __init__(self, rds):
         self.rds = rds
@@ -299,8 +305,32 @@ class Client(object):
         logger.debug(args)
         self.rds.send_command(*args)
 
+    def send_and_receive_command(self, raw):
+        self.send_command(raw)
+        return self.read_response()
+
+    def pack_command(self, *args):
+        """Pack a series of arguments into the Redis protocol
+        this expects only array of bytes
+        """
+        output = []
+        buff = SYM_EMPTY.join(
+            (SYM_STAR, b(str(len(args))), SYM_CRLF))
+
+        for arg in args:
+            buff = SYM_EMPTY.join((buff, SYM_DOLLAR, b(str(len(arg))),
+                                   SYM_CRLF, arg, SYM_CRLF))
+        output.append(buff)
+        return output
+
     def read_response(self):
-        resp = self.rds.read_response()
+        try:
+            resp = self.rds.read_response()
+        except redis.exceptions.ResponseError as e:
+            print_formatted_text(HTML('<b>Response error: {}</b>'.format(e)))
+            logger.exception('response error')
+            raise
+
         resp = self.process_reply(resp)
         return resp
 
@@ -338,11 +368,14 @@ def print_response(resp):
     if isinstance(resp, int):
         return print_formatted_text(resp)
 
+    import xml
     try:
         print_formatted_text(HTML(force_unicode(resp)))
+    except xml.parsers.expat.ExpatError:
+        print_formatted_text(HTML(str(resp)))
     except:
         if isinstance(resp, bytes):
-            logger.critical("got error on response %s", force_unicode(resp.decode()))
+            logger.critical("got error on response %s", force_unicode(resp.decode('utf8', 'backslashreplace')))
         logger.info(resp)
         logger.exception('Exception in print_formatted_text')
 
@@ -420,9 +453,43 @@ def enable_disable_table_mode(*args, client=None):
     print_formatted_text("table output [{}]".format(client.table_mode))
 
 
+def run_copy_database(*args, client=None):
+    client.send_command('keys *')
+    keys = client.read_response()
+    dumps = []
+    for k in keys:
+        # print_formatted_text("key - {}".format(k))
+        client.send_command('dump "{}"'.format(k.decode('utf-8')))
+        v = client.read_response()
+        dumps.append((k, v))
+    client.send_command('select {}'.format(args[0]))
+    print_formatted_text("selected {}".format(client.read_response()))
+    cnt = 0
+    for k, v in dumps:
+        cmd = [b'restore', k, b'0', v]
+        packed_command = client.pack_command(*cmd)
+        client.rds.send_packed_command(packed_command)
+        try:
+            client.read_response()
+            cnt += 1
+        except redis.exceptions.ResponseError as e:
+            if 'BUSYKEY' in str(e):
+                print_formatted_text(HTML('<b>BUSYKEY {} - make sure target database is clear</b>'.format(k)))
+    print_formatted_text(HTML('<b>{} keys copied</b>'.format(cnt)))
+
+def flushdb(*args, client=None):
+    if args[0]:
+        client.send_and_receive_command('select {}'.format(args[0]))
+        print_formatted_text(client.send_and_receive_command('flushdb'))
+    else:
+        print_formatted_text(HTML('<b>Need a db number</b>'))
+
+
 cli_command_fns = {
     '.tables': enable_disable_table_mode,
-    '.help': run_help_command
+    '.help': run_help_command,
+    '.copy': run_copy_database,
+    '.flushdb': flushdb
 }
 
 
