@@ -23,11 +23,22 @@ import logging
 from cli_helpers.tabular_output import TabularOutputFormatter
 from .config import get_config
 from .commands import commands
+import xml
+
 logger = None
 
 
 def debug(s, *args):
     logger.debug(s + '%s ' * len(args), *args)
+
+
+def b(x):
+    """\
+    force bytes
+    :param x:
+    :return:
+    """
+    return x.encode('latin-1') if not isinstance(x, bytes) else x
 
 
 REDIS_COMMANDS = [ 
@@ -61,6 +72,7 @@ REDIS_COMMANDS = [
         'ZREVRANGEBYSCORE', 'ZREVRANK', 'ZSCORE', 'ZUNIONSTORE', 'SCAN', 'SSCAN', 'HSCAN', 'ZSCAN' 
     ]
 REDIS_COMMANDS.sort()
+
 
 def is_json(s):
     try:
@@ -143,15 +155,17 @@ class MonitorState(State):
 
 class SelectState(State):
     def when(self, cmd, current_state):
-        if cmd and cmd[0].upper().startswith('SELECT '):
+        debug("settings select state", cmd, current_state)
+        if cmd and cmd[0].upper() == 'SELECT':
             return self
         return current_state
 
     def process_command(self, cmd):
-        self.next_db = cmd.split(' ')[-1]
+        self.next_db = cmd[-1]
         return cmd
 
     def process_reply(self, resp):
+        debug("select resp [", resp)
         if resp == b'OK':
             self.client.selected_db = self.next_db
         self.client.set_state(self.client.avail_states[0])
@@ -260,11 +274,6 @@ class TableOutputState(State):
         return '\n'.join([ln for ln in formatter.format_output(values, headers, format_name='fancy_grid')])
 
 
-
-def b(x):
-    return x.encode('latin-1') if not isinstance(x, bytes) else x
-
-
 class Client(object):
     def __init__(self, rds):
         self.rds = rds
@@ -368,7 +377,6 @@ def print_response(resp):
     if isinstance(resp, int):
         return print_formatted_text(resp)
 
-    import xml
     try:
         print_formatted_text(HTML(force_unicode(resp)))
     except xml.parsers.expat.ExpatError:
@@ -386,6 +394,7 @@ CLI_COMMANDS = {
     '.help': 'get info about a command',
     '.exit': 'exits'
 }
+
 
 class RedisCompleter(Completer):
 
@@ -433,7 +442,11 @@ class RedisCompleter(Completer):
                 if self.client.keycount() > 1000:
                     return
 
-                self.client.rds.send_command('keys *{}*'.format(word_before_cursor))
+                ask_k = word_before_cursor.replace('keys ', '').strip()
+                if not ask_k:
+                    return
+                debug('"keys *{}*"'.format(ask_k))
+                self.client.rds.send_command('keys *{}*'.format(ask_k))
                 resp = self.client.rds.read_response()
                 for k in resp:
                     yield Completion(force_unicode(k), start_position=-len(word_before_cursor))
@@ -477,6 +490,7 @@ def run_copy_database(*args, client=None):
                 print_formatted_text(HTML('<b>BUSYKEY {} - make sure target database is clear</b>'.format(k)))
     print_formatted_text(HTML('<b>{} keys copied</b>'.format(cnt)))
 
+
 def flushdb(*args, client=None):
     if args[0]:
         client.send_and_receive_command('select {}'.format(args[0]))
@@ -485,11 +499,16 @@ def flushdb(*args, client=None):
         print_formatted_text(HTML('<b>Need a db number</b>'))
 
 
+def show_utc_time(*args, client=None):
+    print_formatted_text("{}".format(time.time()))
+
+
 cli_command_fns = {
     '.tables': enable_disable_table_mode,
     '.help': run_help_command,
     '.copy': run_copy_database,
-    '.flushdb': flushdb
+    '.flushdb': flushdb,
+    '.now': show_utc_time
 }
 
 
@@ -506,7 +525,7 @@ def run_dot_command(command, client=None):
 def main(host, port, database):
     global logger
     config = get_config()
-
+    # print("log file", config['log_file'])
     logging.basicConfig(filename=config['log_file'], level=logging.getLevelName(config['log_level']))
     logger = logging.getLogger(__name__)
 
@@ -543,6 +562,7 @@ def main(host, port, database):
     rds.connect()
 
     client = Client(rds=rds)
+    client.selected_db = database
     rds_completer = RedisCompleter()
     rds_completer.set_client(client)
     completer = merge_completers([rds_completer])
