@@ -522,7 +522,8 @@ def run_dot_command(command, client=None):
 @click.option("--host", '-h', default="127.0.0.1", help="Host")
 @click.option("--port", '-p', default=6379, help="Host")
 @click.option("--database", '-d', default=0, help="Database")
-def main(host, port, database):
+@click.option("--password", "-a", default=None, help="Authentication/Password")
+def main(host, port, database, password):
     global logger
     config = get_config()
     # print("log file", config['log_file'])
@@ -558,7 +559,7 @@ def main(host, port, database):
 
         print_response(resp)
 
-    rds = redis.Connection(host=host, port=int(port), db=database)
+    rds = redis.Connection(host=host, port=int(port), db=database, password=password)
     rds.connect()
 
     client = Client(rds=rds)
