@@ -388,14 +388,6 @@ def print_response(resp):
         logger.exception('Exception in print_formatted_text')
 
 
-CLI_COMMANDS = {
-    '.multiline': 'enters/exits multiline mode',
-    '.tables': 'set tables on/off',
-    '.help': 'get info about a command',
-    '.exit': 'exits'
-}
-
-
 class RedisCompleter(Completer):
 
     def set_client(self, client):
@@ -417,8 +409,8 @@ class RedisCompleter(Completer):
                 yield Completion(k, display_meta='', start_position=-len(word_before_cursor))
 
         elif document.text.startswith('.'):
-            for k, v in CLI_COMMANDS.items():
-                yield Completion(k, display_meta=v, start_position=-len(word_before_cursor))
+            for k, v in sorted(CLI_COMMANDS.items()):
+                yield Completion(k, display_meta=v, start_position=-len(word_before_cursor)-1)
 
         elif ' ' not in document.text:
             for k, v in commands.items():
@@ -452,6 +444,24 @@ class RedisCompleter(Completer):
                     yield Completion(force_unicode(k), start_position=-len(word_before_cursor))
 
 
+CLI_COMMANDS = {}
+
+cli_command_fns = {}
+
+class cli_command(object):
+    def __init__(self, cmd, help_text=None):
+        self.cmd = cmd
+        self.help_text = help_text
+
+    def __call__(self, fn):
+        def wrapper(*args, **kwargs):
+            return fn(*args, **kwargs)
+        cli_command_fns['.{}'.format(self.cmd)] = wrapper
+        CLI_COMMANDS['.{}'.format(self.cmd)] = self.help_text
+        return wrapper
+
+
+@cli_command('help', 'get info about a command')
 def run_help_command(*args, client=None):
     for arg in args:
         c = commands.get(arg.upper())
@@ -461,11 +471,13 @@ def run_help_command(*args, client=None):
         print_formatted_text(c)
 
 
+@cli_command('table', 'enable/disable table mode output for some command results')
 def enable_disable_table_mode(*args, client=None):
     client.table_mode = not client.table_mode
     print_formatted_text("table output [{}]".format(client.table_mode))
 
 
+@cli_command('copydb', 'copies all keys from one database to another database')
 def run_copy_database(*args, client=None):
     client.send_command('keys *')
     keys = client.read_response()
@@ -491,6 +503,7 @@ def run_copy_database(*args, client=None):
     print_formatted_text(HTML('<b>{} keys copied</b>'.format(cnt)))
 
 
+@cli_command('flushdb', 'flushes the database')
 def flushdb(*args, client=None):
     if args[0]:
         client.send_and_receive_command('select {}'.format(args[0]))
@@ -499,17 +512,26 @@ def flushdb(*args, client=None):
         print_formatted_text(HTML('<b>Need a db number</b>'))
 
 
-def show_utc_time(*args, client=None):
-    print_formatted_text("{}".format(time.time()))
+@cli_command('now', 'show unix timestamp')
+def show_unix_time(*args, client=None):
+    print_formatted_text("{}".format(int(time.time())))
 
 
-cli_command_fns = {
-    '.tables': enable_disable_table_mode,
-    '.help': run_help_command,
-    '.copy': run_copy_database,
-    '.flushdb': flushdb,
-    '.now': show_utc_time
-}
+@cli_command('exit', 'exits the cli')
+def exit():
+    pass
+
+
+@cli_command('connect', 'connects to another redis server')
+def connect(host, port, database=0, password=None, client=None):
+    rds = redis.Connection(host=host,
+                           port=int(port), db=database, password=password)
+    client.host = host
+    client.port = port
+    client.password = password
+    rds.connect()
+    client.rds = rds
+    print_formatted_text("connected to:{}:{} [{}]".format(host, port, database))
 
 
 def run_dot_command(command, client=None):
@@ -544,7 +566,7 @@ def main(host, port, database, password):
     session = PromptSession(history=FileHistory(config['history_file']), style=style)
 
     def bottom_toolbar():
-        return HTML('127.0.0.1:6379 db:{} keys:{}'.format(client.selected_db, client.keycount()))
+        return HTML('{}:{} db:{} keys:{}'.format(client.host, client.port, client.selected_db, client.keycount()))
 
     def send_command(raw):
         try:
@@ -563,6 +585,9 @@ def main(host, port, database, password):
     rds.connect()
 
     client = Client(rds=rds)
+    client.host = host
+    client.port = port
+    client.pasword = password
     client.selected_db = database
     rds_completer = RedisCompleter()
     rds_completer.set_client(client)
@@ -572,7 +597,7 @@ def main(host, port, database, password):
 
     while True:
         try:
-            text = session.prompt('> ',
+            text = session.prompt('{}:{} [{}]> '.format(client.host, client.port, client.selected_db),
                     lexer=PygmentsLexer(RedisLexer),
                     completer=completer,
                     bottom_toolbar=bottom_toolbar,
@@ -595,7 +620,7 @@ def main(host, port, database, password):
                     print_formatted_text('Unknown .command [{}]'.format(text))
                 continue
 
-            if text.upper() == 'QUIT':
+            if text.upper() in ('QUIT', 'EXIT', '.EXIT', '.QUIT'):
                 return
 
             if text:
